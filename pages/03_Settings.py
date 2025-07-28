@@ -1,7 +1,17 @@
 import streamlit as st
 import core.database as db
+from core.auth import is_authenticated
 
-st.set_page_config(layout="wide")
+# --- Authentication Check ---
+if not is_authenticated():
+    st.warning("Please log in to access this page.")
+    st.stop()
+
+# --- Sidebar ---
+st.sidebar.title("Navigation")
+if st.sidebar.button("Logout"):
+    del st.session_state.token
+    st.rerun()
 
 st.title("Settings: Categories & Budgets")
 

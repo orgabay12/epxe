@@ -3,10 +3,20 @@ import datetime
 import os
 import core.database as db
 from agent import run_agent
+from core.auth import is_authenticated
 
-st.set_page_config(layout="wide")
+# --- Authentication Check ---
+if not is_authenticated():
+    st.warning("Please log in to access this page.")
+    st.stop()
 
-st.title("Add an Expense")
+# --- Sidebar ---
+st.sidebar.title("Navigation")
+if st.sidebar.button("Logout"):
+    del st.session_state.token
+    st.rerun()
+
+st.title("Upload Transactions")
 
 # --- State Management (for non-persistent UI state) ---
 if 'processed_file_id' not in st.session_state:

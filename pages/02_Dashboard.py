@@ -2,8 +2,18 @@ import streamlit as st
 import pandas as pd
 import core.database as db
 import datetime
+from core.auth import is_authenticated
 
-st.set_page_config(layout="wide")
+# --- Authentication Check ---
+if not is_authenticated():
+    st.warning("Please log in to access this page.")
+    st.stop()
+
+# --- Sidebar ---
+st.sidebar.title("Navigation")
+if st.sidebar.button("Logout"):
+    del st.session_state.token
+    st.rerun()
 
 # --- Handle State Changes (Updates/Deletions) FIRST ---
 # This is the most robust way to handle state in Streamlit.
@@ -43,7 +53,6 @@ if "data_editor" in st.session_state and "df_for_editor" in st.session_state:
         # Clear the widget's state to prevent reprocessing and rerun
         del st.session_state["data_editor"]
         st.rerun()
-
 
 st.title("Dashboard")
 
