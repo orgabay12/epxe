@@ -43,11 +43,6 @@ oauth2 = OAuth2Component(
 # Check if a token exists in the session state
 if 'token' not in st.session_state:
     # If not, show the login button
-
-    # --- TEMPORARY DEBUGGING ---
-    st.info(f"DEBUG: Using redirect_uri: '{settings.APP_URL}'")
-    # -------------------------
-
     result = oauth2.authorize_button(
         name="Continue with Google",
         icon="https://www.google.com/favicon.ico",
