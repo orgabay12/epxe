@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     GCP_OAUTH_CLIENT_SECRET: str
     ENCRYPTION_KEY: str
     AUTHORIZED_USERS: str = ""
+    APP_URL: str
 
     class Config:
         env_file = ".env"
