@@ -197,6 +197,7 @@ narwhals==1.48.0
     # via
     #   personal-finance-dashboard (pyproject.toml)
     #   altair
+    #   plotly
 numpy==2.3.1
     # via
     #   personal-finance-dashboard (pyproject.toml)
@@ -224,6 +225,7 @@ packaging==25.0
     #   langchain-core
     #   langsmith
     #   marshmallow
+    #   plotly
     #   pytesseract
     #   streamlit
 pandas==2.3.1
@@ -235,6 +237,8 @@ pillow==11.3.0
     #   personal-finance-dashboard (pyproject.toml)
     #   pytesseract
     #   streamlit
+plotly==6.2.0
+    # via personal-finance-dashboard (pyproject.toml)
 propcache==0.3.2
     # via
     #   personal-finance-dashboard (pyproject.toml)

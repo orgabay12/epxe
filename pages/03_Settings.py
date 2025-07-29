@@ -15,10 +15,16 @@ if st.sidebar.button("Logout"):
 
 st.title("Settings: Categories & Budgets")
 
-st.header("Manage Your Budgets")
-
 # Fetch categories from the database
 categories_list = db.get_categories()
+
+# Calculate and display total expected expenses
+if categories_list:
+    total_budget = sum(float(c['budget']) for c in categories_list)
+    st.metric(label="Total Expected Expenses", value=f"₪{total_budget:,.2f}")
+    st.divider()
+
+st.header("Manage Your Budgets")
 
 # Display each category with a number input to update its budget
 for cat in categories_list:

@@ -37,8 +37,7 @@ if 'action' in st.session_state:
         localS.setItem('token', token_data)
         st.session_state['token'] = token_data
     elif action == 'logout':
-        localS.removeItem('token')
-        # All other state is cleared on the next line anyway
+        localS.setItem('token', None) # Use setItem with None to clear
         st.session_state.clear()
 
 

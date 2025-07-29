@@ -4,15 +4,26 @@ import core.database as db
 import datetime
 from core.auth import is_authenticated
 
+st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+
+# Custom CSS to change expander hover color
+# This targets the expander header using a more stable attribute selector
+st.markdown("""
+<style>
+    div[data-testid="stExpander"] summary:hover {
+        color: #808080 !important; /* Grey color on hover */
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- Authentication Check ---
 if not is_authenticated():
-    st.warning("Please log in to access this page.")
+    st.error("🔴 Please log in to view this page.")
     st.stop()
 
-# --- Sidebar ---
-st.sidebar.title("Navigation")
-if st.sidebar.button("Logout"):
-    del st.session_state.token
+st.sidebar.write(f"Welcome, **{st.session_state.get('user_info', {}).get('name', '')}**!")
+if st.sidebar.button("Logout", key="dashboard_logout"):
+    st.session_state.clear()
     st.rerun()
 
 # --- Handle State Changes (Updates/Deletions) FIRST ---
@@ -54,7 +65,7 @@ if "data_editor" in st.session_state and "df_for_editor" in st.session_state:
         del st.session_state["data_editor"]
         st.rerun()
 
-st.title("Dashboard")
+st.title("📊 Dashboard")
 
 # Fetch data from the database
 expenses = db.get_expenses()
@@ -108,8 +119,19 @@ if expenses:
         month_number = months.index(selected_month_name)
         filtered_df = filtered_df[filtered_df['date'].dt.month == month_number]
 
+    # Sort by date descending before displaying anywhere
+    if not filtered_df.empty:
+        filtered_df = filtered_df.sort_values(by="date", ascending=False)
+
     # --- Visualizations (using filtered_df) ---
     st.header("Spending vs. Budget")
+    
+    # Calculate and display total expected expenses
+    if categories_dict:
+        total_budget = sum(c['budget'] for c in categories_dict.values())
+        st.metric(label="Total Expected Expenses (for selected period)", value=f"₪{total_budget:,.2f}")
+        st.divider()
+        
     spending_by_category = filtered_df.groupby('category')['amount'].sum()
     
     for category_name, cat_data in categories_dict.items():
@@ -135,7 +157,11 @@ if expenses:
         with st.expander(f"View Transactions for {category_name}"):
             category_transactions_df = filtered_df[filtered_df['category'] == category_name]
             if not category_transactions_df.empty:
-                st.dataframe(category_transactions_df, use_container_width=True)
+                st.dataframe(
+                    category_transactions_df[['merchant', 'amount', 'date']], 
+                    use_container_width=True,
+                    hide_index=True
+                )
             else:
                 st.write("No transactions for this category yet.")
 
@@ -147,6 +173,7 @@ if expenses:
     # that was passed to the editor.
     st.data_editor(
         filtered_df,
+        column_order=("merchant", "category", "date", "amount"),
         hide_index=True,
         num_rows="dynamic", # Allows deletion and addition
         column_config={
