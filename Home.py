@@ -1,48 +1,74 @@
 import streamlit as st
-import asyncio
 from streamlit_oauth import OAuth2Component
 from core.config import settings
 import base64
 import json
+from streamlit_local_storage import LocalStorage
+from datetime import datetime, timezone
+
+# --- App Configuration & Helper Functions ---
+st.set_page_config(page_title="Home", page_icon="🏠", layout="wide")
+localS = LocalStorage()
 
 def decode_id_token(token):
-    """Safely decodes a Google ID token to get user information."""
+    """
+    Safely decodes a Google ID token and checks for expiration.
+    Returns the user payload if the token is valid, otherwise None.
+    """
     try:
-        # The ID token is the second part of the JWT
-        payload = token.split('.')[1]
-        # It needs to be base64 decoded with padding
-        decoded_payload = base64.b64decode(payload + '==').decode('utf-8')
-        return json.loads(decoded_payload)
-    except Exception as e:
-        print(f"Error decoding ID token: {e}")
+        payload_b64 = token.split('.')[1]
+        payload_bytes = base64.b64decode(payload_b64 + '==')
+        user_info = json.loads(payload_bytes)
+
+        # Check if the token is expired.
+        if 'exp' in user_info and datetime.fromtimestamp(user_info['exp'], tz=timezone.utc) < datetime.now(tz=timezone.utc):
+            return None  # Token is expired
+
+        return user_info
+    except Exception:
         return None
 
-# --- App Configuration ---
-st.set_page_config(page_title="Home", page_icon="🏠", layout="wide")
+# --- Action Handler for State Changes ---
+# This runs first to handle pending actions from the previous run.
+if 'action' in st.session_state:
+    action = st.session_state.pop('action')
+    if action == 'login':
+        token_data = st.session_state.pop('token_data')
+        localS.setItem('token', token_data)
+        st.session_state['token'] = token_data
+    elif action == 'logout':
+        localS.removeItem('token')
+        # All other state is cleared on the next line anyway
+        st.session_state.clear()
+
 
 # --- OAuth Configuration ---
 AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
-REFRESH_TOKEN_URL = "https://oauth2.googleapis.com/token" # Same as token endpoint for Google
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
-# --- Main App ---
-st.title("Welcome to Your Personal Finance Dashboard!")
-st.write("Please log in to continue.")
-
-# Create an OAuth2Component instance
 oauth2 = OAuth2Component(
-    settings.GCP_OAUTH_CLIENT_ID, 
-    settings.GCP_OAUTH_CLIENT_SECRET, 
-    AUTHORIZE_ENDPOINT, 
-    TOKEN_ENDPOINT, 
-    REFRESH_TOKEN_URL, 
+    settings.GCP_OAUTH_CLIENT_ID,
+    settings.GCP_OAUTH_CLIENT_SECRET,
+    AUTHORIZE_ENDPOINT,
+    TOKEN_ENDPOINT,
+    TOKEN_ENDPOINT, # Refresh token endpoint
     REVOKE_ENDPOINT
 )
 
-# Check if a token exists in the session state
-if 'token' not in st.session_state:
-    # If not, show the login button
+# --- Authentication Logic ---
+# Try to load token from session state first, then from local storage
+token = st.session_state.get('token')
+if not token:
+    token = localS.getItem('token')
+    if token:
+        st.session_state['token'] = token
+
+# Main logic based on token presence
+if not token:
+    st.title("Welcome to Your Personal Finance Dashboard!")
+    st.write("Please log in to continue.")
+
     result = oauth2.authorize_button(
         name="Continue with Google",
         icon="https://www.google.com/favicon.ico",
@@ -53,22 +79,19 @@ if 'token' not in st.session_state:
         use_container_width=True
     )
     if result:
-        # User has successfully authenticated.
-        # Now, we need to check if they are on our allowlist.
         token_data = result.get('token')
         if token_data:
             id_token = token_data.get('id_token')
             user_info = decode_id_token(id_token)
-
             if user_info:
                 user_email = user_info.get('email')
                 authorized_users_list = [email.strip() for email in settings.AUTHORIZED_USERS.split(',')]
                 if user_email in authorized_users_list:
-                    # If authorized, store the token and rerun.
-                    st.session_state.token = token_data # Store the full token data
+                    # Set up the action for the next run
+                    st.session_state['action'] = 'login'
+                    st.session_state['token_data'] = token_data
                     st.rerun()
                 else:
-                    # If not authorized, show an error.
                     st.error("Access denied. Your email is not authorized.")
             else:
                 st.error("Could not retrieve user information from Google.")
@@ -76,11 +99,9 @@ if 'token' not in st.session_state:
             st.error("Login failed. No token received.")
 
 else:
-    # If a token exists, show the user's info and a logout button
-    token_data = st.session_state['token']
-    id_token = token_data.get('id_token')
+    id_token = token.get('id_token')
     user_info = decode_id_token(id_token)
-    
+
     if user_info:
         st.sidebar.write(f"Welcome, **{user_info.get('name')}**!")
         
@@ -88,7 +109,6 @@ else:
         st.markdown(
             """
             **👈 Select a page from the sidebar to get started:**
-
             - **Upload:** Add new transactions.
             - **Dashboard:** Visualize your spending.
             - **Settings:** Manage your categories and budgets.
@@ -96,7 +116,9 @@ else:
         )
         
         if st.sidebar.button("Logout"):
-            del st.session_state.token
+            st.session_state['action'] = 'logout'
             st.rerun()
-
-# The logic to protect other pages will go here, checking st.session_state.token 
+    else:
+        # If the token is invalid (expired or corrupted), force a logout.
+        st.session_state['action'] = 'logout'
+        st.rerun() 

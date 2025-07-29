@@ -342,7 +342,10 @@ sqlalchemy==2.0.41
 streamlit==1.47.0
     # via
     #   personal-finance-dashboard (pyproject.toml)
+    #   streamlit-local-storage
     #   streamlit-oauth
+streamlit-local-storage==0.0.25
+    # via personal-finance-dashboard (pyproject.toml)
 streamlit-oauth==0.1.14
     # via personal-finance-dashboard (pyproject.toml)
 tavily-python==0.7.10
