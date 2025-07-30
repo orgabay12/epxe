@@ -6,6 +6,7 @@ from core.database import get_category_by_merchant, get_categories
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage
 from langchain_tavily import TavilySearch
+from langgraph.config import get_stream_writer
 
 # --- Graph Nodes ---
 
@@ -13,7 +14,9 @@ def extract_transaction_node(state: GraphState):
     """
     Extracts merchant and amount from a receipt image.
     """
-    print("---EXTRACTING TRANSACTIONS---")
+    writer = get_stream_writer()
+    writer({"step": "image_extraction", "message": "🖼️ Analyzing receipt image..."})
+    
     image_bytes = state["image_bytes"]
 
     llm = AzureChatOpenAI(
@@ -32,27 +35,86 @@ def extract_transaction_node(state: GraphState):
         ]
     )
     try:
+        writer({"step": "image_extraction", "message": "🔍 Processing image with AI..."})
         response = structured_llm.invoke([message])
-        print("---FINISH EXTRACTING TRANSACTION---")
+        
+        count = len(response.transactions)
+        writer({"step": "image_extraction", "message": f"✅ Extracted {count} transaction(s) from image"})
+        
         return {"transactions": response.transactions}
     except Exception as e:
-        print(f"Error in extraction node: {e}")
+        writer({"step": "image_extraction", "message": f"❌ Error extracting from image: {str(e)}"})
+        return {"transactions": []}
+
+
+def extract_text_transaction_node(state: GraphState):
+    """
+    Extracts transactions from text data (e.g., Excel file content).
+    """
+    writer = get_stream_writer()
+    writer({"step": "text_extraction", "message": "📄 Analyzing Excel file content..."})
+    
+    text_data = state["text_data"]
+
+    llm = AzureChatOpenAI(
+        azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+        openai_api_version=settings.OPENAI_API_VERSION,
+        temperature=0,
+        max_tokens=4096,
+    )
+    structured_llm = llm.with_structured_output(Transactions)
+    
+    message = HumanMessage(
+        content=f"""You are an expert financial data analyzer. Extract all transactions from the following data.
+        Look for patterns that indicate merchant names, amounts, and dates.
+        
+        For dates, convert any format to YYYY-MM-DD. Common formats include:
+        - DD/MM/YY or DD/MM/YYYY
+        - MM/DD/YY or MM/DD/YYYY  
+        - DD-MM-YY or DD-MM-YYYY
+        - Text dates like "Jan 15, 2024"
+        
+        For amounts, look for currency symbols or numerical values that represent money.
+        
+        Here is the data to analyze:
+        
+        {text_data}
+        """
+    )
+    
+    try:
+        writer({"step": "text_extraction", "message": "🤖 Processing text data with AI..."})
+        response = structured_llm.invoke([message])
+        
+        count = len(response.transactions)
+        writer({"step": "text_extraction", "message": f"✅ Extracted {count} transaction(s) from text"})
+        
+        return {"transactions": response.transactions}
+    except Exception as e:
+        writer({"step": "text_extraction", "message": f"❌ Error extracting from text: {str(e)}"})
         return {"transactions": []}
 
 
 def classify_transaction_node(state: GraphState) -> GraphState:
     """Classifies a single transaction by looking up the merchant or using an LLM."""
-    print("---CLASSIFYING TRANSACTIONS---")
+    writer = get_stream_writer()
+    writer({"step": "classification", "message": "🏷️ Starting transaction classification..."})
+    
     categorized_transactions = []
     all_categories = [cat['name'] for cat in get_categories()] # Fetch all category names once
+    transactions = state["transactions"]
+    
+    writer({"step": "classification", "message": f"🔄 Processing {len(transactions)} transaction(s)..."})
 
-    for tx in state["transactions"]:
+    for i, tx in enumerate(transactions):
+        writer({"step": "classification", "message": f"🔍 Classifying transaction {i+1}/{len(transactions)}: {tx.merchant}"})
+        
         # 1. Check if the merchant is already known
         category = get_category_by_merchant(tx.merchant)
 
         # 2. If not known, use the LLM to classify
         if not category:
-            print(f"---CLASSIFYING TRANSACTION FOR {tx.merchant} WITH LLM---")
+            writer({"step": "classification", "message": f"🤖 Using AI to classify '{tx.merchant}'"})
             llm = AzureChatOpenAI(
                 azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                 openai_api_version=settings.OPENAI_API_VERSION,
@@ -67,20 +129,21 @@ def classify_transaction_node(state: GraphState) -> GraphState:
                 f"Use the search tool to find out more about the merchant if you are unsure. "
                 f"Your final answer should be ONLY the category name."
             )
-            print("---FINISH CLASSIFYING TRANSACTION---")
             try:
                 response = agent_executor.invoke({"messages": [("user", prompt)]})
                 predicted_category = response['messages'][-1].content.strip()
                 # Ensure the predicted category is one of the valid categories
                 if predicted_category in all_categories:
                     category = predicted_category
+                    writer({"step": "classification", "message": f"✅ AI classified '{tx.merchant}' as '{category}'"})
                 else:
                     category = "Uncategorized" # Fallback if LLM hallucinates a new category
+                    writer({"step": "classification", "message": f"⚠️ AI gave invalid category, using 'Uncategorized' for '{tx.merchant}'"})
             except Exception as e:
-                print(f"Error during classification: {e}")
+                writer({"step": "classification", "message": f"❌ Error classifying '{tx.merchant}': {str(e)}"})
                 category = "Uncategorized"
         else:
-            print(f"---FOUND CATEGORY '{category}' FOR MERCHANT '{tx.merchant}' IN DB---")
+            writer({"step": "classification", "message": f"💾 Found existing category '{category}' for '{tx.merchant}'"})
 
         categorized_transactions.append(
             CategorizedTransaction(
@@ -90,5 +153,6 @@ def classify_transaction_node(state: GraphState) -> GraphState:
                 category=category,
             )
         )
-    print("---FINISH CLASSIFYING TRANSACTIONS---")
+    
+    writer({"step": "classification", "message": f"🎉 Classification complete! Processed {len(categorized_transactions)} transaction(s)"})
     return {"categorized_transactions": categorized_transactions} 
