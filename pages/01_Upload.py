@@ -7,7 +7,6 @@ from core.auth import is_authenticated
 import pandas as pd
 from agent.graph import build_agent
 import time
-from streamlit_local_storage import LocalStorage
 
 # --- Authentication Check ---
 if not is_authenticated():
@@ -118,13 +117,13 @@ with tab1:
                                         skipped_count += 1
                                         continue
                                     
-                                    # Check for duplicates
-                                    if not db.transaction_exists(merchant, float(amount), date):
+                                    # Check for duplicates via identifier (merchant+date)
+                                    if not db.transaction_exists_by_identifier(merchant, date):
                                         db.add_expense(merchant, float(amount), date, category)
                                         logs.append(f"✅ Added: {merchant} - ₪{amount} ({category})")
                                         added_count += 1
                                     else:
-                                        logs.append(f"⏭️ Skipped duplicate: {merchant} - ₪{amount}")
+                                        logs.append(f"⏭️ Skipped duplicate (same day): {merchant} - ₪{amount}")
                                         skipped_count += 1
                                     
                                     # Update the display periodically
@@ -212,12 +211,12 @@ with tab2:
             if categorized_transactions:
                 for tx in categorized_transactions:
                     # Check for duplicates before adding
-                    if not db.transaction_exists(tx.merchant, tx.amount, tx.date):
+                    if not db.transaction_exists_by_identifier(tx.merchant, tx.date):
                         db.add_expense(tx.merchant, tx.amount, tx.date, tx.category)
                         logs.append(f"✅ Added: {tx.merchant} - ₪{tx.amount}")
                         added_count += 1
                     else:
-                        logs.append(f"⏭️ Skipped duplicate: {tx.merchant} - ₪{tx.amount}")
+                        logs.append(f"⏭️ Skipped duplicate (same day): {tx.merchant} - ₪{tx.amount}")
                         skipped_count += 1
                         
                     # Update the display
@@ -248,10 +247,10 @@ with tab3:
         if add_transaction_submitted:
             if merchant and amount > 0:
                 # Check for duplicates before adding
-                if not db.transaction_exists(merchant, amount, date.strftime("%Y-%m-%d")):
+                if not db.transaction_exists_by_identifier(merchant, date.strftime("%Y-%m-%d")):
                     db.add_expense(merchant, amount, date.strftime("%Y-%m-%d"), category)
                     st.success("Transaction added!")
                 else:
-                    st.warning("This transaction already exists.")
+                    st.warning("This transaction already exists (same merchant for the selected date).")
             else:
                 st.error("Please fill out all the fields.") 

@@ -18,7 +18,7 @@ def get_connection():
     return psycopg2.connect(settings.DATABASE_URL)
 
 def setup_database():
-    """Creates the necessary tables if they don't exist."""
+    """Creates the necessary tables if they don't exist and applies lightweight migrations."""
     conn = get_connection()
     cur = conn.cursor()
     
@@ -39,7 +39,40 @@ def setup_database():
             category TEXT NOT NULL
         );
     """)
-    
+
+    # --- Lightweight migration: add identifier column and unique index ---
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name='expenses' AND column_name='identifier'
+            ) THEN
+                ALTER TABLE expenses ADD COLUMN identifier TEXT;
+            END IF;
+        END$$;
+    """)
+
+    # Backfill identifier for existing rows where null
+    cur.execute("""
+        UPDATE expenses
+        SET identifier = lower(trim(merchant)) || '|' || to_char(date, 'YYYY-MM-DD')
+        WHERE identifier IS NULL;
+    """)
+
+    # Ensure unique index on identifier
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS unique_expenses_identifier ON expenses(identifier);
+    """)
+
+    # Optionally enforce NOT NULL now that we've backfilled
+    try:
+        cur.execute("ALTER TABLE expenses ALTER COLUMN identifier SET NOT NULL;")
+    except Exception:
+        # If this fails (e.g., due to concurrent ops), proceed without hard enforcement
+        conn.rollback()
+        cur = conn.cursor()
+
     # Seed initial categories if the table is empty
     cur.execute("SELECT COUNT(*) FROM categories")
     if cur.fetchone()[0] == 0:
@@ -54,6 +87,13 @@ def setup_database():
     conn.commit()
     cur.close()
     conn.close()
+
+# --- Helper ---
+
+def _compute_identifier(merchant: str, date: str) -> str:
+    """Compute a stable identifier from merchant and date (YYYY-MM-DD)."""
+    normalized_merchant = (merchant or "").strip().lower()
+    return f"{normalized_merchant}|{date}"
 
 # --- Categories CRUD ---
 
@@ -87,27 +127,29 @@ def update_category_budget(category_id: int, new_budget: float):
 def get_expenses() -> List[Dict[str, Any]]:
     conn = get_connection()
     cur = conn.cursor(cursor_factory=DictCursor)
-    cur.execute("""
+    cur.execute(
+        """
         SELECT id, merchant, amount, date, category
         FROM expenses
         ORDER BY date DESC
-    """)
+        """
+    )
     expenses = [dict(row) for row in cur.fetchall()]
     cur.close()
     conn.close()
     return expenses
 
 def transaction_exists(merchant: str, amount: float, date: str) -> bool:
-    """Checks if a transaction with the same merchant, amount, and date already exists."""
+    """Deprecated: retained for compatibility; now checks by identifier (merchant+date)."""
+    return transaction_exists_by_identifier(merchant, date)
+
+def transaction_exists_by_identifier(merchant: str, date: str) -> bool:
+    """Checks if a transaction with the same identifier already exists."""
     conn = get_connection()
     cur = conn.cursor()
-    query = """
-        SELECT id
-        FROM expenses
-        WHERE merchant = %s AND amount = %s AND date = %s;
-    """
-    # Ensure amount is a float for the query
-    cur.execute(query, (merchant, float(amount), date))
+    identifier = _compute_identifier(merchant, date)
+    query = "SELECT 1 FROM expenses WHERE identifier = %s LIMIT 1;"
+    cur.execute(query, (identifier,))
     result = cur.fetchone()
     cur.close()
     conn.close()
@@ -116,18 +158,26 @@ def transaction_exists(merchant: str, amount: float, date: str) -> bool:
 def add_expense(merchant: str, amount: float, date: str, category_name: str):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO expenses (merchant, amount, date, category) VALUES (%s, %s, %s, %s)",
-        (merchant, amount, date, category_name)
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    identifier = _compute_identifier(merchant, date)
+    try:
+        cur.execute(
+            """
+            INSERT INTO expenses (merchant, amount, date, category, identifier)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (identifier) DO NOTHING
+            """,
+            (merchant, amount, date, category_name, identifier)
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     return True
 
 def update_expense(expense_id: int, merchant: str, amount: float, date: str, category: str):
     conn = get_connection()
     cur = conn.cursor()
+    # Do not update identifier; keep it stable from original insertion
     cur.execute(
         """
         UPDATE expenses
@@ -146,7 +196,7 @@ def delete_expense(expense_id: int):
     cur.execute("DELETE FROM expenses WHERE id = %s", (expense_id,))
     conn.commit()
     cur.close()
-    conn.close() 
+    conn.close()
 
 def get_category_by_merchant(merchant_name: str) -> str | None:
     """Finds the most recent category for a given merchant from the expenses table."""
