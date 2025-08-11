@@ -1,3 +1,44 @@
+"""
+Lightweight migration framework (PostgreSQL)
+
+Overview
+- Tracks schema version in a single-row table `schema_migrations(version)`.
+- Uses a PostgreSQL advisory lock to ensure only one process applies migrations.
+- Each migration block is idempotent and guarded with `IF NOT EXISTS` or data backfills.
+- Data seeding (e.g., categories) is separated from schema migrations and runs outside the lock.
+
+Runtime flow
+1) Base tables are created with CREATE TABLE IF NOT EXISTS.
+2) Acquire advisory lock (single writer).
+3) Read current version FOR UPDATE.
+4) Execute migration blocks conditionally (e.g., if current_version < 1).
+5) Bump `schema_migrations.version` to the target after successful block.
+6) Release advisory lock.
+7) Run idempotent seeders outside of the lock.
+
+How to add a new migration version (example for v2)
+- Pick the next integer version (e.g., from 1 to 2).
+- Inside `setup_database()` under the advisory lock, add a guarded block:
+
+    if current_version < 2:
+        # v2: <short description>
+        # 1) Schema changes with guards
+        # cur.execute("CREATE TABLE IF NOT EXISTS ...")
+        # cur.execute("ALTER TABLE ...")
+        # 2) Data backfills guarded to avoid rework
+        # cur.execute("UPDATE ... WHERE <predicate to limit scope>")
+        # 3) Indexes/constraints (IF NOT EXISTS where possible)
+        # cur.execute("CREATE INDEX IF NOT EXISTS ...")
+        # 4) Optionally enforce NOT NULL after backfill; handle exceptions with rollback and re-lock
+        # 5) Update version
+        cur.execute("UPDATE schema_migrations SET version = 2;")
+
+Best practices
+- Keep all steps idempotent; use guards (`IF NOT EXISTS`, `WHERE col IS NULL`, etc.).
+- Split schema and seed data flows. Do not seed inside the migration lock.
+- Backfill before adding NOT NULL constraints.
+- Prefer deterministic formats (e.g., to_char) for derived columns.
+"""
 import os
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -18,10 +59,11 @@ def get_connection():
     return psycopg2.connect(settings.DATABASE_URL)
 
 def setup_database():
-    """Creates the necessary tables if they don't exist and applies lightweight migrations."""
+    """Creates the necessary tables if they don't exist and applies versioned, idempotent migrations once."""
     conn = get_connection()
     cur = conn.cursor()
     
+    # Base tables
     cur.execute("""
         CREATE TABLE IF NOT EXISTS categories (
             id SERIAL PRIMARY KEY,
@@ -40,52 +82,78 @@ def setup_database():
         );
     """)
 
-    # --- Lightweight migration: add identifier column and unique index ---
+    # Schema migrations tracking
     cur.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns 
-                WHERE table_name='expenses' AND column_name='identifier'
-            ) THEN
-                ALTER TABLE expenses ADD COLUMN identifier TEXT;
-            END IF;
-        END$$;
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER NOT NULL
+        );
     """)
+    # Ensure a single row exists
+    cur.execute(
+        """
+        INSERT INTO schema_migrations (version)
+        SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM schema_migrations);
+        """
+    )
 
-    # Backfill identifier for existing rows where null (merchant|date|amount)
-    cur.execute("""
-        UPDATE expenses
-        SET identifier = lower(trim(merchant)) || '|' || to_char(date, 'YYYY-MM-DD') || '|' || to_char(amount, 'FM999999990.00')
-        WHERE identifier IS NULL;
-    """)
+    # Acquire advisory lock to avoid concurrent migration runs
+    # Use a fixed 64-bit key
+    cur.execute("SELECT pg_advisory_lock(579123456789012345);")
 
-    # Ensure unique index on identifier
-    cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS unique_expenses_identifier ON expenses(identifier);
-    """)
-
-    # Optionally enforce NOT NULL now that we've backfilled
     try:
-        cur.execute("ALTER TABLE expenses ALTER COLUMN identifier SET NOT NULL;")
-    except Exception:
-        conn.rollback()
-        cur = conn.cursor()
+        # Read current version with row lock
+        cur.execute("SELECT version FROM schema_migrations LIMIT 1 FOR UPDATE;")
+        row = cur.fetchone()
+        current_version = int(row[0]) if row else 0
 
-    # Seed initial categories if the table is empty
-    cur.execute("SELECT COUNT(*) FROM categories")
-    if cur.fetchone()[0] == 0:
-        initial_categories = {
-            "Coffee": 700, "Restaurants": 700, "Supermarket & Groceries": 1000,
-            "Pharmacy": 300, "Clothing": 200, "Car Gas": 700, "Car Expenses": 100,
-            "TV & Communication": 300, "Taxi & Bus": 100, "Uncategorized": 2000,
-        }
-        for name, budget in initial_categories.items():
-            cur.execute("INSERT INTO categories (name, budget) VALUES (%s, %s)", (name, budget))
+        # Migration v1: add identifier (merchant|date|amount) with unique index and backfill
+        if current_version < 1:
+            # Add column if missing
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='expenses' AND column_name='identifier'
+                    ) THEN
+                        ALTER TABLE expenses ADD COLUMN identifier TEXT;
+                    END IF;
+                END$$;
+            """)
 
-    conn.commit()
-    cur.close()
-    conn.close()
+            # Backfill identifier for existing rows where null (merchant|date|amount)
+            cur.execute("""
+                UPDATE expenses
+                SET identifier = lower(trim(merchant)) || '|' || to_char(date, 'YYYY-MM-DD') || '|' || to_char(amount, 'FM999999990.00')
+                WHERE identifier IS NULL;
+            """)
+
+            # Ensure unique index on identifier
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS unique_expenses_identifier ON expenses(identifier);")
+
+            # Enforce NOT NULL if possible (will be safe after backfill)
+            try:
+                cur.execute("ALTER TABLE expenses ALTER COLUMN identifier SET NOT NULL;")
+            except Exception:
+                conn.rollback()
+                cur = conn.cursor()
+                cur.execute("SELECT pg_advisory_lock(579123456789012345);")
+
+            # Bump version
+            cur.execute("UPDATE schema_migrations SET version = 1;")
+
+        conn.commit()
+    finally:
+        # Always release lock
+        try:
+            cur.execute("SELECT pg_advisory_unlock(579123456789012345);")
+        except Exception:
+            pass
+        cur.close()
+        conn.close()
+
+    # Run idempotent data seeding outside schema migration lock
+    seed_initial_categories()
 
 # --- Helper ---
 
@@ -101,6 +169,26 @@ def _compute_identifier(merchant: str, date: str, amount: float) -> str:
     normalized_merchant = (merchant or "").strip().lower()
     amount_str = _normalize_amount(amount)
     return f"{normalized_merchant}|{date}|{amount_str}"
+
+# --- Idempotent seeders ---
+
+def seed_initial_categories() -> None:
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM categories")
+        if cur.fetchone()[0] == 0:
+            initial_categories = {
+                "Coffee": 700, "Restaurants": 700, "Supermarket & Groceries": 1000,
+                "Pharmacy": 300, "Clothing": 200, "Car Gas": 700, "Car Expenses": 100,
+                "TV & Communication": 300, "Taxi & Bus": 100, "Uncategorized": 2000,
+            }
+            for name, budget in initial_categories.items():
+                cur.execute("INSERT INTO categories (name, budget) VALUES (%s, %s)", (name, budget))
+            conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 # --- Categories CRUD ---
 
