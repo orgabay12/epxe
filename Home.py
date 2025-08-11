@@ -36,8 +36,14 @@ if 'action' in st.session_state:
         token_data = st.session_state.pop('token_data')
         localS.setItem('token', token_data)
         st.session_state['token'] = token_data
+        st.session_state['user_info'] = decode_id_token(token_data.get('id_token', '')) or {}
     elif action == 'logout':
-        localS.setItem('token', None) # Use setItem with None to clear
+        # Clear token from browser storage and session
+        try:
+            localS.deleteAll()
+        except Exception:
+            # Fallback if component not ready
+            localS.setItem('token', None)
         st.session_state.clear()
 
 
@@ -59,9 +65,13 @@ oauth2 = OAuth2Component(
 # Try to load token from session state first, then from local storage
 token = st.session_state.get('token')
 if not token:
-    token = localS.getItem('token')
-    if token:
-        st.session_state['token'] = token
+    token_candidate = localS.getItem('token')
+    # Normalize: require a dict with an 'id_token'
+    if isinstance(token_candidate, dict) and token_candidate.get('id_token'):
+        st.session_state['token'] = token_candidate
+        token = token_candidate
+    else:
+        token = None
 
 # Main logic based on token presence
 if not token:
@@ -102,6 +112,7 @@ else:
     user_info = decode_id_token(id_token)
 
     if user_info:
+        st.session_state['user_info'] = user_info
         st.sidebar.write(f"Welcome, **{user_info.get('name')}**!")
         
         st.title("Welcome to Your Personal Finance Dashboard!")

@@ -24,8 +24,8 @@ if not is_authenticated():
 
 st.sidebar.write(f"Welcome, **{st.session_state.get('user_info', {}).get('name', '')}**!")
 if st.sidebar.button("Logout", key="dashboard_logout"):
-    st.session_state.clear()
-    st.rerun()
+    st.session_state['action'] = 'logout'
+    st.switch_page("Home.py")
 
 # --- Handle State Changes (Updates/Deletions) FIRST ---
 # This is the most robust way to handle state in Streamlit.

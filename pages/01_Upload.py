@@ -7,6 +7,7 @@ from core.auth import is_authenticated
 import pandas as pd
 from agent.graph import build_agent
 import time
+from streamlit_local_storage import LocalStorage
 
 # --- Authentication Check ---
 if not is_authenticated():
@@ -16,8 +17,8 @@ if not is_authenticated():
 # --- Sidebar ---
 st.sidebar.title("Navigation")
 if st.sidebar.button("Logout"):
-    del st.session_state.token
-    st.rerun()
+    st.session_state['action'] = 'logout'
+    st.switch_page("Home.py")
 
 st.title("💸 Upload Transactions")
 

@@ -10,8 +10,8 @@ if not is_authenticated():
 # --- Sidebar ---
 st.sidebar.title("Navigation")
 if st.sidebar.button("Logout"):
-    del st.session_state.token
-    st.rerun()
+    st.session_state['action'] = 'logout'
+    st.switch_page("Home.py")
 
 st.title("Settings: Categories & Budgets")
 
