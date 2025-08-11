@@ -53,10 +53,10 @@ def setup_database():
         END$$;
     """)
 
-    # Backfill identifier for existing rows where null
+    # Backfill identifier for existing rows where null (merchant|date|amount)
     cur.execute("""
         UPDATE expenses
-        SET identifier = lower(trim(merchant)) || '|' || to_char(date, 'YYYY-MM-DD')
+        SET identifier = lower(trim(merchant)) || '|' || to_char(date, 'YYYY-MM-DD') || '|' || to_char(amount, 'FM999999990.00')
         WHERE identifier IS NULL;
     """)
 
@@ -69,7 +69,6 @@ def setup_database():
     try:
         cur.execute("ALTER TABLE expenses ALTER COLUMN identifier SET NOT NULL;")
     except Exception:
-        # If this fails (e.g., due to concurrent ops), proceed without hard enforcement
         conn.rollback()
         cur = conn.cursor()
 
@@ -90,10 +89,18 @@ def setup_database():
 
 # --- Helper ---
 
-def _compute_identifier(merchant: str, date: str) -> str:
-    """Compute a stable identifier from merchant and date (YYYY-MM-DD)."""
+def _normalize_amount(amount: float) -> str:
+    """Format amount to a consistent string with 2 decimal places for identifier."""
+    try:
+        return f"{float(amount):.2f}"
+    except Exception:
+        return "0.00"
+
+def _compute_identifier(merchant: str, date: str, amount: float) -> str:
+    """Compute a stable identifier from merchant, date (YYYY-MM-DD), and amount."""
     normalized_merchant = (merchant or "").strip().lower()
-    return f"{normalized_merchant}|{date}"
+    amount_str = _normalize_amount(amount)
+    return f"{normalized_merchant}|{date}|{amount_str}"
 
 # --- Categories CRUD ---
 
@@ -140,14 +147,14 @@ def get_expenses() -> List[Dict[str, Any]]:
     return expenses
 
 def transaction_exists(merchant: str, amount: float, date: str) -> bool:
-    """Deprecated: retained for compatibility; now checks by identifier (merchant+date)."""
-    return transaction_exists_by_identifier(merchant, date)
+    """Checks if a transaction with the same identifier (merchant+date+amount) already exists."""
+    return transaction_exists_by_identifier(merchant, amount, date)
 
-def transaction_exists_by_identifier(merchant: str, date: str) -> bool:
+def transaction_exists_by_identifier(merchant: str, amount: float, date: str) -> bool:
     """Checks if a transaction with the same identifier already exists."""
     conn = get_connection()
     cur = conn.cursor()
-    identifier = _compute_identifier(merchant, date)
+    identifier = _compute_identifier(merchant, date, amount)
     query = "SELECT 1 FROM expenses WHERE identifier = %s LIMIT 1;"
     cur.execute(query, (identifier,))
     result = cur.fetchone()
@@ -158,7 +165,7 @@ def transaction_exists_by_identifier(merchant: str, date: str) -> bool:
 def add_expense(merchant: str, amount: float, date: str, category_name: str):
     conn = get_connection()
     cur = conn.cursor()
-    identifier = _compute_identifier(merchant, date)
+    identifier = _compute_identifier(merchant, date, amount)
     try:
         cur.execute(
             """
