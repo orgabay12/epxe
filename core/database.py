@@ -142,6 +142,88 @@ def setup_database():
             # Bump version
             cur.execute("UPDATE schema_migrations SET version = 1;")
 
+        # Migration v2: add created_at/updated_at and triggers for auto-updates
+        if current_version < 2:
+            # Add timestamps to expenses
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='expenses' AND column_name='created_at'
+                    ) THEN
+                        ALTER TABLE expenses ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='expenses' AND column_name='updated_at'
+                    ) THEN
+                        ALTER TABLE expenses ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+                    END IF;
+                END$$;
+            """)
+            # Add timestamps to categories (optional, for consistency)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='categories' AND column_name='created_at'
+                    ) THEN
+                        ALTER TABLE categories ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='categories' AND column_name='updated_at'
+                    ) THEN
+                        ALTER TABLE categories ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+                    END IF;
+                END$$;
+            """)
+            # Updater function (idempotent via replace)
+            cur.execute(
+                """
+                CREATE OR REPLACE FUNCTION set_updated_at()
+                RETURNS trigger AS $$
+                BEGIN
+                    NEW.updated_at = now();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            )
+            # Triggers for expenses and categories if not exists
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger WHERE tgname = 'set_expenses_updated_at'
+                    ) THEN
+                        CREATE TRIGGER set_expenses_updated_at
+                        BEFORE UPDATE ON expenses
+                        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+                    END IF;
+                END$$;
+                """
+            )
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger WHERE tgname = 'set_categories_updated_at'
+                    ) THEN
+                        CREATE TRIGGER set_categories_updated_at
+                        BEFORE UPDATE ON categories
+                        FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+                    END IF;
+                END$$;
+                """
+            )
+            # Bump version
+            cur.execute("UPDATE schema_migrations SET version = 2;")
+
         conn.commit()
     finally:
         # Always release lock
@@ -224,7 +306,7 @@ def get_expenses() -> List[Dict[str, Any]]:
     cur = conn.cursor(cursor_factory=DictCursor)
     cur.execute(
         """
-        SELECT id, merchant, amount, date, category
+        SELECT id, merchant, amount, date, category, created_at
         FROM expenses
         ORDER BY date DESC
         """

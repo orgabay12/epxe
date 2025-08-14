@@ -21,9 +21,7 @@ def extract_transaction_node(state: GraphState):
 
     llm = AzureChatOpenAI(
         azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-        openai_api_version=settings.OPENAI_API_VERSION,
-        temperature=0,
-        max_tokens=2048,
+        openai_api_version=settings.OPENAI_API_VERSION
     )
     structured_llm = llm.with_structured_output(Transactions)
     
@@ -58,9 +56,7 @@ def extract_text_transaction_node(state: GraphState):
 
     llm = AzureChatOpenAI(
         azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-        openai_api_version=settings.OPENAI_API_VERSION,
-        temperature=0,
-        max_tokens=4096,
+        openai_api_version=settings.OPENAI_API_VERSION
     )
     structured_llm = llm.with_structured_output(Transactions)
     
@@ -117,8 +113,7 @@ def classify_transaction_node(state: GraphState) -> GraphState:
             writer({"step": "classification", "message": f"🤖 Using AI to classify '{tx.merchant}'"})
             llm = AzureChatOpenAI(
                 azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                openai_api_version=settings.OPENAI_API_VERSION,
-                temperature=0
+                openai_api_version=settings.OPENAI_API_VERSION
             )
             tools = [TavilySearch(max_results=1)]
             agent_executor = create_react_agent(llm, tools)

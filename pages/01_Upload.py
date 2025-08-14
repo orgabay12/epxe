@@ -72,21 +72,19 @@ with tab1:
                         log_placeholder = st.empty()
                         log_placeholder.text("\n".join(logs[-8:]))
                         
-                        # Stream the graph execution
-                        categorized_transactions = None
-                        for chunk in app.stream(inputs, stream_mode="custom"):
-                            if chunk:
-                                step = chunk.get("step", "processing")
-                                message = chunk.get("message", str(chunk))
-                                logs.append(message)
-                                
-                                # Update the status and display latest logs
-                                status.update(label=f"📄 Processing: {message[:50]}...", expanded=True)
-                                log_placeholder.text("\n".join(logs[-8:]))
+                        # Stream the graph execution once and capture final state
+                        final_state = None
+                        for mode, chunk in app.stream(inputs, stream_mode=["custom", "values"]):
+                            if mode == "custom":
+                                message = (chunk or {}).get("message") or str(chunk)
+                                if message:
+                                    logs.append(message)
+                                    status.update(label=f"📄 Processing: {message[:50]}...", expanded=True)
+                                    log_placeholder.text("\n".join(logs[-8:]))
+                            elif mode == "values":
+                                final_state = chunk or {}
                         
-                        # Get the final result
-                        final_state = app.invoke(inputs)
-                        categorized_transactions = final_state.get("categorized_transactions", [])
+                        categorized_transactions = (final_state or {}).get("categorized_transactions", [])
                         
                         if not categorized_transactions:
                             logs.append("⚠️ No transactions extracted")
@@ -189,21 +187,19 @@ with tab2:
             
             log_placeholder = st.empty()
             
-            # Stream the graph execution
-            categorized_transactions = None
-            for chunk in app.stream(inputs, stream_mode="custom"):
-                if chunk:
-                    step = chunk.get("step", "processing")
-                    message = chunk.get("message", str(chunk))
-                    logs.append(message)
-                    
-                    # Update the status and display latest logs
-                    status.update(label=f"🤖 Processing: {message[:50]}...", expanded=True)
-                    log_placeholder.text("\n".join(logs[-8:]))  # Show last 8 logs
+            # Stream the graph execution once and capture final state
+            final_state = None
+            for mode, chunk in app.stream(inputs, stream_mode=["custom", "values"]):
+                if mode == "custom":
+                    message = (chunk or {}).get("message") or str(chunk)
+                    if message:
+                        logs.append(message)
+                        status.update(label=f"🤖 Processing: {message[:50]}...", expanded=True)
+                        log_placeholder.text("\n".join(logs[-8:]))
+                elif mode == "values":
+                    final_state = chunk or {}
             
-            # Get the final result
-            final_state = app.invoke(inputs)
-            categorized_transactions = final_state.get("categorized_transactions", [])
+            categorized_transactions = (final_state or {}).get("categorized_transactions", [])
             
             # Process and save transactions
             added_count = 0

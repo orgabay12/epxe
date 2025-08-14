@@ -81,6 +81,8 @@ transactions_df = pd.DataFrame(expenses)
 # Ensure correct data types for display
 transactions_df['amount'] = pd.to_numeric(transactions_df['amount'])
 transactions_df['date'] = pd.to_datetime(transactions_df['date'])
+# created_at -> createdDate (always present)
+transactions_df['createdDate'] = pd.to_datetime(transactions_df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
 
 # --- Determine Default Filters ---
 latest_year = None
@@ -157,17 +159,42 @@ with right_title:
 
 st.divider()
 
-
-# Sort by date descending before displaying anywhere
-if not filtered_df.empty:
-    filtered_df = filtered_df.sort_values(by="date", ascending=False)
-        
 spending_by_category = filtered_df.groupby('category')['amount'].sum()
-    
+
+# Build sortable view of categories
+categories_view = []
 for category_name, cat_data in categories_dict.items():
     budget = cat_data['budget']
     spending = spending_by_category.get(category_name, 0)
-        
+    deviation = float(spending) - float(budget)
+    categories_view.append({
+        "name": category_name,
+        "budget": budget,
+        "spending": spending,
+        "deviation": deviation,
+    })
+
+# Sorting buttons
+sort_choice = st.radio(
+    "Sort categories by",
+    ["A-Z", "Total", "Deviation"],
+    index=0,
+    horizontal=True,
+    key="categories_sort_choice"
+)
+
+if sort_choice == "A-Z":
+    categories_view.sort(key=lambda x: x["name"].lower())
+elif sort_choice == "Total":
+    categories_view.sort(key=lambda x: x["spending"], reverse=True)
+else:  # Deviation
+    categories_view.sort(key=lambda x: x["deviation"], reverse=True)
+
+for item in categories_view:
+    category_name = item["name"]
+    budget = item["budget"]
+    spending = item["spending"]
+    
     # Conditionally color if budget is exceeded
     if budget > 0 and spending > budget:
         st.markdown(
@@ -196,6 +223,20 @@ for category_name, cat_data in categories_dict.items():
             st.write("No transactions for this category yet.")
 
 st.header("Edit or Delete Transactions")
+
+# --- Sorting Controls (moved here) ---
+sort_col_options = ["date", "amount", "merchant", "category", "createdDate"]
+col_sc, col_so = st.columns([2, 1])
+with col_sc:
+    selected_sort_col = st.selectbox("Sort by", sort_col_options, index=0, key="editor_sort_col")
+with col_so:
+    sort_order = st.radio("Order", ["Descending", "Ascending"], index=0, horizontal=True, key="editor_sort_order")
+ascending_flag = (sort_order == "Ascending")
+
+if selected_sort_col == "createdDate":
+    filtered_df = filtered_df.sort_values(by="created_at", ascending=ascending_flag)
+else:
+    filtered_df = filtered_df.sort_values(by=selected_sort_col, ascending=ascending_flag)
     
 # The data_editor now uses num_rows="dynamic" for deletion.
 # Its state is stored for processing on the next run.
@@ -203,7 +244,7 @@ st.header("Edit or Delete Transactions")
 # that was passed to the editor.
 st.data_editor(
     filtered_df,
-    column_order=("merchant", "category", "date", "amount"),
+    column_order=("merchant", "category", "date", "amount", "createdDate"),
     hide_index=True,
     num_rows="dynamic", # Allows deletion and addition
     column_config={
@@ -215,6 +256,11 @@ st.data_editor(
         "date": st.column_config.DateColumn(
             "Date",
             format="YYYY-MM-DD"
+        ),
+        "createdDate": st.column_config.TextColumn(
+            "Created Date",
+            help="When this transaction was created",
+            disabled=True
         ),
         "id": None # Hide the ID column
     },

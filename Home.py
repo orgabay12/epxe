@@ -5,6 +5,10 @@ import base64
 import json
 from streamlit_local_storage import LocalStorage
 from datetime import datetime, timezone
+from core.database import initialize_database
+
+# Ensure DB is initialized (runs once per process)
+initialize_database()
 
 # --- App Configuration & Helper Functions ---
 st.set_page_config(page_title="Home", page_icon="🏠", layout="wide")
