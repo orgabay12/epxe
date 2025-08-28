@@ -6,6 +6,21 @@ import json
 from streamlit_local_storage import LocalStorage
 from datetime import datetime, timezone
 from core.database import initialize_database
+import os, subprocess, pathlib
+
+if os.getenv("PLAYWRIGHT_AUTO_INSTALL")=="True":
+    _marker = pathlib.Path("/tmp/.pw_installed")
+    if not _marker.exists():
+        try:
+            subprocess.run(
+                ["python", "-m", "playwright", "install", "--with-deps", "chromium"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+            )
+            _marker.touch()
+        except Exception:
+            pass
 
 # Ensure DB is initialized (runs once per process)
 initialize_database()
