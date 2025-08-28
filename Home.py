@@ -163,3 +163,15 @@ else:
         # If the token is invalid (expired or corrupted), force a logout.
         st.session_state['action'] = 'logout'
         st.rerun() 
+
+if os.getenv("PLAYWRIGHT_HEALTHCHECK","true").lower() in ("1","true"):
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True, args=["--disable-dev-shm-usage","--no-sandbox"])
+            pg = b.new_page()
+            pg.goto("https://example.com", wait_until="domcontentloaded", timeout=20000)
+            logger.info("Playwright healthcheck OK, title=%s", pg.title())
+            b.close()
+    except Exception:
+        logger.exception("Playwright healthcheck FAILED") 
