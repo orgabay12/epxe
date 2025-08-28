@@ -186,21 +186,49 @@ def browse_credit_card_node(state: GraphState):
     async def _browser_agent_run() -> str:
         # Force using Playwright Chromium (avoid branded Chrome install attempts)
         os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
-        session = BrowserSession(headless=True, keep_alive=False, user_data_dir=None)
+        session = BrowserSession(headless=False, keep_alive=True, user_data_dir=None)
         today = datetime.date.today()
         current_date = today.strftime("%Y-%m-%d")
         current_month = today.strftime("%Y-%m")
+        # Start the session and open the login page up-front
+        await session.start()
+        page = await session.get_current_page()
+        await page.goto(login_url)
+        # Stage 1: Login
+        login_agent = BrowserAgent(
+            task=(
+                f"1. You are on {login_url}.\n"
+                f"2. Log in with username '{username}' and password '{password}'.\n"
+                f"3. Finish as soon as the account area/dashboard is visible. Do not extract data in this stage."
+            ),
+            llm=bu_llm,
+            page=page,
+            browser_session=session
+        )
+        await login_agent.run(max_steps=25)
+
+        # Manual navigation to transactions page
+        # Reacquire page in case the agent switched tabs or the handle changed
+        page = await session.get_current_page()
+        await page.goto(tx_url)
+
+        # Stage 2: Extraction (text-only)
         agent = BrowserAgent(
             task=(
-                f"1. Open {login_url}.\n"
-                f"2. Log in with username '{username}' and password '{password}'.\n"
-                f"3. Navigate to {tx_url}. Today's date is {current_date}. Set the date filter to the current month ({current_month}) and ensure only transactions from {current_month} are included.\n"
-                f"4. Extract a table of transactions with columns merchant, amount, date.\n"
+                f"You are on the transactions page {tx_url}. Today's date is {current_date}.\n"
+                f"1. Ensure the date filter is set to the current month ({current_month}).\n"
+                f"2. Extract transactions using ONLY textual DOM content (innerText). Do NOT rely on images or OCR.\n"
+                f"3. Extract a table of transactions with columns merchant, amount, date.\n"
+                f"4. IMPORTANT: Do not include escaped unicode sequences (e.g., \\u0022) or HTML entities (e.g., &quot;). Use plain characters only.\n"
                 f"5. Return ONLY a JSON array with objects: {{merchant: string, amount: number, date: 'YYYY-MM-DD'}}."
             ),
             llm=bu_llm,
+            page=page,
             browser_session=session,
+            use_vision=False,
+            use_vision_for_planner=True
         )
+
         try:
             history = await agent.run(max_steps=40)
             # Try common helpers to get final text content
@@ -223,19 +251,26 @@ def browse_credit_card_node(state: GraphState):
                     await session.close()
             except Exception:
                 pass
+            # Ensure the browser fully terminates
+            try:
+                if hasattr(session, "kill"):
+                    await session.kill()
+            except Exception:
+                pass
 
     try:
         raw_content = asyncio.run(_browser_agent_run())
         llm = AzureChatOpenAI(
-            azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            azure_deployment='gpt-4.1',
             openai_api_version=settings.OPENAI_API_VERSION
         )
         structured_llm = llm.with_structured_output(Transactions)
-        message = HumanMessage(content=f"You are a strict validator. Convert the following to the schema Transactions[merchant, amount, date(YYYY-MM-DD)]:\n{raw_content}")
+        message = HumanMessage(content=(
+            "You are a strict validator. Convert the following to the schema Transactions[merchant, amount, date(YYYY-MM-DD)].\n"
+            "Do NOT emit escaped unicode sequences (e.g., \\uXXXX) or HTML entities (e.g., &quot;). Output plain characters only.\n"
+            f"Input:\n{raw_content}"
+        ))
         validated = structured_llm.invoke([message])
-        for tx in validated.transactions:
-            tx.merchant = sanitize_merchant(tx.merchant)
-
         count = len(validated.transactions)
         writer({"step": "web_browse", "message": f"✅ Extracted {count} transaction(s) from issuer website"})
         return {"transactions": validated.transactions}
