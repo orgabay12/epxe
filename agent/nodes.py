@@ -13,9 +13,7 @@ from langgraph.config import get_stream_writer
 from browser_use import Agent as BrowserAgent
 from browser_use import BrowserSession
 from browser_use.llm import ChatAzureOpenAI
-import re
-import unicodedata
-from agent.sanitize import sanitize_merchant
+from browser_use import BrowserProfile
 
 # --- Graph Nodes ---
 
@@ -187,7 +185,6 @@ def browse_credit_card_node(state: GraphState):
         # Force using Playwright Chromium (avoid branded Chrome install attempts)
         os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
         os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "debug")
-        from browser_use import BrowserProfile
         profile = BrowserProfile(
             headless=True,
             user_data_dir=None,
@@ -210,7 +207,7 @@ def browse_credit_card_node(state: GraphState):
         writer({"step": "web_browse", "message": "✅ BrowserSession started"})
         writer({"step": "web_browse", "message": "🧭 Getting current page handle..."})
         writer({"step": "web_browse", "message": f"➡️ Navigating: {login_url}"})
-        page = await session.navigate(url=login_url, new_tab=False)
+        page = await session.navigate(url=login_url, new_tab=True)
         writer({"step": "web_browse", "message": "✅ Login page loaded"})
         # Stage 1: Login
         writer({"step": "web_browse", "message": "🤖 Running login agent..."})
