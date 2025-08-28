@@ -170,7 +170,7 @@ if os.getenv("PLAYWRIGHT_HEALTHCHECK","true").lower() in ("1","true"):
         with sync_playwright() as p:
             b = p.chromium.launch(headless=True, args=["--disable-dev-shm-usage","--no-sandbox"])
             pg = b.new_page()
-            pg.goto("https://example.com", wait_until="domcontentloaded", timeout=20000)
+            pg.goto("https://www.max.co.il/login", wait_until="domcontentloaded", timeout=20000)
             logger.info("Playwright healthcheck OK, title=%s", pg.title())
             b.close()
     except Exception:
