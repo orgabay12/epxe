@@ -31,7 +31,9 @@ if os.getenv("PLAYWRIGHT_AUTO_INSTALL")=="True":
             logger.exception("Playwright Chromium install failed")
     else:
         logger.info("Playwright install skipped (marker present).")
-
+else:
+    logger.info("Playwright install skipped (PLAYWRIGHT_AUTO_INSTALL not set).")
+    
 # Ensure DB is initialized (runs once per process)
 initialize_database()
 
