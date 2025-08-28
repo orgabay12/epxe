@@ -208,7 +208,10 @@ def browse_credit_card_node(state: GraphState):
         writer({"step": "web_browse", "message": "🚀 Starting BrowserSession..."})
         await session.start()
         writer({"step": "web_browse", "message": "✅ BrowserSession started"})
+        writer({"step": "web_browse", "message": "🧭 Getting current page handle..."})
         page = await session.get_current_page()
+        writer({"step": "web_browse", "message": "🧭 Got page handle"})
+        writer({"step": "web_browse", "message": f"➡️ Navigating: {login_url}"})
         await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         writer({"step": "web_browse", "message": "✅ Login page loaded"})
         # Stage 1: Login
@@ -225,14 +228,15 @@ def browse_credit_card_node(state: GraphState):
         )
         await login_agent.run(max_steps=25)
         writer({"step": "web_browse", "message": "✅ Login agent finished"})
-
+ 
         # Manual navigation to transactions page
         # Reacquire page in case the agent switched tabs or the handle changed
+        writer({"step": "web_browse", "message": "🧭 Getting current page for transactions..."})
         page = await session.get_current_page()
-        writer({"step": "web_browse", "message": f"➡️ Navigating to transactions URL: {tx_url}"})
+        writer({"step": "web_browse", "message": f"➡️ Navigating: {tx_url}"})
         await page.goto(tx_url, wait_until="domcontentloaded", timeout=60000)
         writer({"step": "web_browse", "message": "✅ Transactions page loaded"})
-
+ 
         # Stage 2: Extraction (text-only)
         writer({"step": "web_browse", "message": "🧠 Running extraction agent..."})
         agent = BrowserAgent(
