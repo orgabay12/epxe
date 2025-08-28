@@ -209,8 +209,14 @@ def browse_credit_card_node(state: GraphState):
         await session.start()
         writer({"step": "web_browse", "message": "✅ BrowserSession started"})
         writer({"step": "web_browse", "message": "🧭 Getting current page handle..."})
-        page = await session.get_current_page()
-        writer({"step": "web_browse", "message": "🧭 Got page handle"})
+        try:
+            page = await asyncio.wait_for(session.get_current_page(), timeout=15)
+            writer({"step": "web_browse", "message": "🧭 Got page handle"})
+        except Exception as e:
+            writer({"step": "web_browse", "message": f"⚠️ get_current_page timed out/failed: {e}. Opening new tab..."})
+            assert session.browser_context is not None, "Browser context not available"
+            page = await session.browser_context.new_page()
+            writer({"step": "web_browse", "message": "🆕 Opened fresh tab"})
         writer({"step": "web_browse", "message": f"➡️ Navigating: {login_url}"})
         await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         writer({"step": "web_browse", "message": "✅ Login page loaded"})
