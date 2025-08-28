@@ -186,6 +186,7 @@ def browse_credit_card_node(state: GraphState):
     async def _browser_agent_run() -> str:
         # Force using Playwright Chromium (avoid branded Chrome install attempts)
         os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
+        os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "debug")
         from browser_use import BrowserProfile
         profile = BrowserProfile(
             headless=True,
@@ -204,10 +205,14 @@ def browse_credit_card_node(state: GraphState):
         current_date = today.strftime("%Y-%m-%d")
         current_month = today.strftime("%Y-%m")
         # Start the session and open the login page up-front
+        writer({"step": "web_browse", "message": "🚀 Starting BrowserSession..."})
         await session.start()
+        writer({"step": "web_browse", "message": "✅ BrowserSession started"})
         page = await session.get_current_page()
         await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+        writer({"step": "web_browse", "message": "✅ Login page loaded"})
         # Stage 1: Login
+        writer({"step": "web_browse", "message": "🤖 Running login agent..."})
         login_agent = BrowserAgent(
             task=(
                 f"1. You are on {login_url}.\n"
@@ -219,13 +224,17 @@ def browse_credit_card_node(state: GraphState):
             browser_session=session
         )
         await login_agent.run(max_steps=25)
+        writer({"step": "web_browse", "message": "✅ Login agent finished"})
 
         # Manual navigation to transactions page
         # Reacquire page in case the agent switched tabs or the handle changed
         page = await session.get_current_page()
+        writer({"step": "web_browse", "message": f"➡️ Navigating to transactions URL: {tx_url}"})
         await page.goto(tx_url, wait_until="domcontentloaded", timeout=60000)
+        writer({"step": "web_browse", "message": "✅ Transactions page loaded"})
 
         # Stage 2: Extraction (text-only)
+        writer({"step": "web_browse", "message": "🧠 Running extraction agent..."})
         agent = BrowserAgent(
             task=(
                 f"You are on the transactions page {tx_url}. Today's date is {current_date}.\n"
@@ -244,6 +253,7 @@ def browse_credit_card_node(state: GraphState):
 
         try:
             history = await agent.run(max_steps=40)
+            writer({"step": "web_browse", "message": "✅ Extraction agent finished"})
             # Try common helpers to get final text content
             raw = None
             try:
