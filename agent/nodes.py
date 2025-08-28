@@ -186,16 +186,19 @@ def browse_credit_card_node(state: GraphState):
     async def _browser_agent_run() -> str:
         # Force using Playwright Chromium (avoid branded Chrome install attempts)
         os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
-        session = BrowserSession(
+        from browser_use import BrowserProfile
+        profile = BrowserProfile(
             headless=True,
-            keep_alive=True,
             user_data_dir=None,
             enable_default_extensions=False,
             highlight_elements=False,
             default_timeout=60000,
             default_navigation_timeout=60000,
-            timeout=60000,
             wait_for_network_idle_page_load_time=1.5,
+        )
+        session = BrowserSession(
+            browser_profile=profile,
+            keep_alive=True,
         )
         today = datetime.date.today()
         current_date = today.strftime("%Y-%m-%d")
