@@ -186,14 +186,24 @@ def browse_credit_card_node(state: GraphState):
     async def _browser_agent_run() -> str:
         # Force using Playwright Chromium (avoid branded Chrome install attempts)
         os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
-        session = BrowserSession(headless=True, keep_alive=True, user_data_dir=None)
+        session = BrowserSession(
+            headless=True,
+            keep_alive=True,
+            user_data_dir=None,
+            enable_default_extensions=False,
+            highlight_elements=False,
+            default_timeout=60000,
+            default_navigation_timeout=60000,
+            timeout=60000,
+            wait_for_network_idle_page_load_time=1.5,
+        )
         today = datetime.date.today()
         current_date = today.strftime("%Y-%m-%d")
         current_month = today.strftime("%Y-%m")
         # Start the session and open the login page up-front
         await session.start()
         page = await session.get_current_page()
-        await page.goto(login_url)
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         # Stage 1: Login
         login_agent = BrowserAgent(
             task=(
@@ -210,7 +220,7 @@ def browse_credit_card_node(state: GraphState):
         # Manual navigation to transactions page
         # Reacquire page in case the agent switched tabs or the handle changed
         page = await session.get_current_page()
-        await page.goto(tx_url)
+        await page.goto(tx_url, wait_until="domcontentloaded", timeout=60000)
 
         # Stage 2: Extraction (text-only)
         agent = BrowserAgent(
