@@ -6,6 +6,7 @@ from core.auth import is_authenticated
 import pandas as pd
 from agent.graph import build_agent
 import time
+from agent.sanitize import sanitize_merchant
 
 # --- Authentication Check ---
 if not is_authenticated():
@@ -101,7 +102,7 @@ with tab1:
                             
                             for i, transaction in enumerate(categorized_transactions):
                                 try:
-                                    merchant = transaction.merchant
+                                    merchant = sanitize_merchant(transaction.merchant)
                                     amount = transaction.amount
                                     date = transaction.date
                                     category = transaction.category
@@ -205,13 +206,14 @@ with tab2:
             skipped_count = 0
             if categorized_transactions:
                 for tx in categorized_transactions:
+                    merchant = sanitize_merchant(tx.merchant)
                     # Check for duplicates before adding
-                    if not db.transaction_exists_by_identifier(tx.merchant, tx.amount, tx.date):
-                        db.add_expense(tx.merchant, tx.amount, tx.date, tx.category)
-                        logs.append(f"✅ Added: {tx.merchant} - ₪{tx.amount}")
+                    if not db.transaction_exists_by_identifier(merchant, tx.amount, tx.date):
+                        db.add_expense(merchant, tx.amount, tx.date, tx.category)
+                        logs.append(f"✅ Added: {merchant} - ₪{tx.amount}")
                         added_count += 1
                     else:
-                        logs.append(f"⏭️ Skipped duplicate: {tx.merchant} - ₪{tx.amount}")
+                        logs.append(f"⏭️ Skipped duplicate: {merchant} - ₪{tx.amount}")
                         skipped_count += 1
                         
                     # Update the display
@@ -241,6 +243,7 @@ with tab3:
         add_transaction_submitted = st.form_submit_button("Add Transaction")
         if add_transaction_submitted:
             if merchant and amount > 0:
+                merchant = sanitize_merchant(merchant)
                 # Check for duplicates before adding
                 if not db.transaction_exists_by_identifier(merchant, amount, date.strftime("%Y-%m-%d")):
                     db.add_expense(merchant, amount, date.strftime("%Y-%m-%d"), category)
@@ -282,12 +285,13 @@ with tab4:
                 added_count = 0
                 skipped_count = 0
                 for tx in categorized_transactions:
-                    if not db.transaction_exists_by_identifier(tx.merchant, tx.amount, tx.date):
-                        db.add_expense(tx.merchant, tx.amount, tx.date, tx.category)
-                        logs.append(f"✅ Added: {tx.merchant} - ₪{tx.amount}")
+                    merchant = sanitize_merchant(tx.merchant)
+                    if not db.transaction_exists_by_identifier(merchant, tx.amount, tx.date):
+                        db.add_expense(merchant, tx.amount, tx.date, tx.category)
+                        logs.append(f"✅ Added: {merchant} - ₪{tx.amount}")
                         added_count += 1
                     else:
-                        logs.append(f"⏭️ Skipped duplicate: {tx.merchant} - ₪{tx.amount}")
+                        logs.append(f"⏭️ Skipped duplicate: {merchant} - ₪{tx.amount}")
                         skipped_count += 1
                     log_placeholder.text("\n".join(logs[-8:]))
 
