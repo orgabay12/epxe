@@ -2,7 +2,6 @@ import streamlit as st
 import datetime
 import os
 import core.database as db
-from agent import run_agent
 from core.auth import is_authenticated
 import pandas as pd
 from agent.graph import build_agent
@@ -30,7 +29,7 @@ categories_list = db.get_categories()
 categories_dict = {cat['name']: {'id': cat['id'], 'budget': float(cat['budget'])} for cat in categories_list}
 
 # --- Tabs for different input methods ---
-tab1, tab2, tab3 = st.tabs(["📄 AI Excel Processing", "🤖 AI Image Extraction", "📝 Manual Entry"])
+tab1, tab2, tab3, tab4 = st.tabs(["📄 AI Excel Processing", "🤖 AI Image Extraction", "📝 Manual Entry", "🌐 Web Extract"])
 
 with tab1:
     st.header("Upload an Excel File")
@@ -249,4 +248,52 @@ with tab3:
                 else:
                     st.warning("This transaction already exists (same merchant, date and amount).")
             else:
-                st.error("Please fill out all the fields.") 
+                st.error("Please fill out all the fields.")
+
+with tab4:
+    st.header("Fetch Current Month from Issuer Website")
+    st.write("Uses your configured issuer credentials to log in and extract the current month's transactions.")
+
+    if st.button("Web Extract"):
+        logs = []
+        with st.status("🌐 Starting web extraction...", expanded=True) as status:
+            try:
+                app = build_agent()
+                inputs = {
+                    "image_bytes": b"",
+                    "text_data": "",
+                    "input_type": "web",
+                    "categories": list(categories_dict.keys()),
+                }
+
+                log_placeholder = st.empty()
+                final_state = None
+                for mode, chunk in app.stream(inputs, stream_mode=["custom", "values"]):
+                    if mode == "custom":
+                        message = (chunk or {}).get("message") or str(chunk)
+                        if message:
+                            logs.append(message)
+                            status.update(label=f"🌐 Web: {message[:50]}...", expanded=True)
+                            log_placeholder.text("\n".join(logs[-8:]))
+                    elif mode == "values":
+                        final_state = chunk or {}
+
+                categorized_transactions = (final_state or {}).get("categorized_transactions", [])
+                added_count = 0
+                skipped_count = 0
+                for tx in categorized_transactions:
+                    if not db.transaction_exists_by_identifier(tx.merchant, tx.amount, tx.date):
+                        db.add_expense(tx.merchant, tx.amount, tx.date, tx.category)
+                        logs.append(f"✅ Added: {tx.merchant} - ₪{tx.amount}")
+                        added_count += 1
+                    else:
+                        logs.append(f"⏭️ Skipped duplicate: {tx.merchant} - ₪{tx.amount}")
+                        skipped_count += 1
+                    log_placeholder.text("\n".join(logs[-8:]))
+
+                status.update(label=f"✅ Complete! Added {added_count}, skipped {skipped_count}", state="complete", expanded=True)
+                st.success(f"Done! Added {added_count} new transactions, skipped {skipped_count}.")
+            except Exception as e:
+                logs.append(f"❌ Error: {str(e)}")
+                status.update(label="❌ Error during web extraction", state="error", expanded=True)
+                st.error(f"Error during web extraction: {e}") 

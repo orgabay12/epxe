@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     AUTHORIZED_USERS: str = ""
     APP_URL: str
 
+    # Credit card issuer website credentials and endpoints (used by browser node)
+    CREDIT_CARD_ISSUER_LOGIN_URL: str = ""
+    CREDIT_CARD_ISSUER_TRANSACTIONS_URL: str = ""
+    CREDIT_CARD_ISSUER_USERNAME: str = ""
+    CREDIT_CARD_ISSUER_PASSWORD: str = ""
+
     class Config:
         env_file = "../.env"
         env_file_encoding = "utf-8"

@@ -1,4 +1,7 @@
 import base64
+import os
+import asyncio
+import datetime
 from langgraph.prebuilt import create_react_agent
 from core.config import settings
 from .models import Transactions, CategorizedTransaction, GraphState
@@ -7,6 +10,9 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage
 from langchain_tavily import TavilySearch
 from langgraph.config import get_stream_writer
+from browser_use import Agent as BrowserAgent
+from browser_use import BrowserSession
+from browser_use.llm import ChatAzureOpenAI
 
 # --- Graph Nodes ---
 
@@ -150,4 +156,84 @@ def classify_transaction_node(state: GraphState) -> GraphState:
         )
     
     writer({"step": "classification", "message": f"🎉 Classification complete! Processed {len(categorized_transactions)} transaction(s)"})
-    return {"categorized_transactions": categorized_transactions} 
+    return {"categorized_transactions": categorized_transactions}
+
+
+def browse_credit_card_node(state: GraphState):
+    """
+    Logs into the credit card issuer's website and extracts current-month transactions.
+    Uses browser-use with Azure OpenAI.
+    """
+    writer = get_stream_writer()
+    writer({"step": "web_browse", "message": "🌐 Launching headless browser to fetch transactions..."})
+
+    login_url = settings.CREDIT_CARD_ISSUER_LOGIN_URL
+    tx_url = settings.CREDIT_CARD_ISSUER_TRANSACTIONS_URL
+    username = settings.CREDIT_CARD_ISSUER_USERNAME
+    password = settings.CREDIT_CARD_ISSUER_PASSWORD
+
+    bu_llm = ChatAzureOpenAI(
+        api_key=settings.AZURE_OPENAI_API_KEY,
+        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+        azure_deployment="gpt-4.1",
+        model="gpt-4.1",
+        api_version=settings.OPENAI_API_VERSION
+    )
+
+    async def _browser_agent_run() -> str:
+        session = BrowserSession(headless=True, keep_alive=False, user_data_dir=None)
+        today = datetime.date.today()
+        current_date = today.strftime("%Y-%m-%d")
+        current_month = today.strftime("%Y-%m")
+        agent = BrowserAgent(
+            task=(
+                f"1. Open {login_url}.\n"
+                f"2. Log in with username '{username}' and password '{password}'.\n"
+                f"3. Navigate to {tx_url}. Today's date is {current_date}. Set the date filter to the current month ({current_month}) and ensure only transactions from {current_month} are included.\n"
+                f"4. Extract a table of transactions with columns merchant, amount, date.\n"
+                f"5. Return ONLY a JSON array with objects: {{merchant: string, amount: number, date: 'YYYY-MM-DD'}}."
+            ),
+            llm=bu_llm,
+            browser_session=session,
+        )
+        try:
+            history = await agent.run(max_steps=40)
+            # Try common helpers to get final text content
+            raw = None
+            try:
+                final_result = getattr(history, "final_result", None)
+                raw = final_result() if callable(final_result) else None
+            except Exception:
+                raw = None
+            if not raw:
+                try:
+                    extracted = getattr(history, "extracted_content", None)
+                    raw = extracted() if callable(extracted) else None
+                except Exception:
+                    raw = None
+            return raw if isinstance(raw, str) else str(history)
+        finally:
+            try:
+                if hasattr(session, "close"):
+                    await session.close()
+            except Exception:
+                pass
+
+    try:
+        raw_content = asyncio.run(_browser_agent_run())
+        llm = AzureChatOpenAI(
+            azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            openai_api_version=settings.OPENAI_API_VERSION
+        )
+        structured_llm = llm.with_structured_output(Transactions)
+        message = HumanMessage(content=f"You are a strict validator. Convert the following to the schema Transactions[merchant, amount, date(YYYY-MM-DD)]:\n{raw_content}")
+        validated = structured_llm.invoke([message])
+
+        count = len(validated.transactions)
+        writer({"step": "web_browse", "message": f"✅ Extracted {count} transaction(s) from issuer website"})
+        return {"transactions": validated.transactions}
+
+    except Exception as e:
+        print(e)
+        writer({"step": "web_browse", "message": f"❌ Error during web browsing: {str(e)}"})
+        return {"transactions": []} 

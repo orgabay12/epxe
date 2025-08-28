@@ -25,7 +25,7 @@ class CategorizedTransaction(BaseModel):
 class GraphState(TypedDict):
     image_bytes: bytes
     text_data: str
-    input_type: str  # "image" or "text"
+    input_type: str  # "image" or "text" or "web"
     categories: List[str]
     transactions: List[Transaction]
     categorized_transactions: List[CategorizedTransaction] 
