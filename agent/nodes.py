@@ -13,6 +13,8 @@ from langgraph.config import get_stream_writer
 from browser_use import Agent as BrowserAgent
 from browser_use import BrowserSession
 from browser_use.llm import ChatAzureOpenAI
+import re
+import unicodedata
 
 # --- Graph Nodes ---
 
@@ -230,6 +232,26 @@ def browse_credit_card_node(state: GraphState):
         structured_llm = llm.with_structured_output(Transactions)
         message = HumanMessage(content=f"You are a strict validator. Convert the following to the schema Transactions[merchant, amount, date(YYYY-MM-DD)]:\n{raw_content}")
         validated = structured_llm.invoke([message])
+
+        # Sanitize merchant strings: allow Hebrew (\u0590-\u05FF), English letters, digits and common signs; drop other unicode escapes
+        allowed_pattern = re.compile(r"[^A-Za-z0-9\u0590-\u05FF \-\'&\./(),]")
+        def _sanitize_text(value: str) -> str:
+            if not isinstance(value, str):
+                return value
+            # Normalize unicode (e.g., composed forms) and convert NBSP-like spaces to normal spaces
+            normalized = unicodedata.normalize("NFKC", value)
+            normalized = (
+                normalized
+                .replace("\u00A0", " ")  # NBSP
+                .replace("\u202F", " ")  # Narrow NBSP
+                .replace("\u2007", " ")  # Figure space
+            )
+            cleaned = allowed_pattern.sub("", normalized)
+            cleaned = re.sub(r"\s+", " ", cleaned)
+            return cleaned.strip()
+
+        for tx in validated.transactions:
+            tx.merchant = _sanitize_text(tx.merchant)
 
         count = len(validated.transactions)
         writer({"step": "web_browse", "message": f"✅ Extracted {count} transaction(s) from issuer website"})
