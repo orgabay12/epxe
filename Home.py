@@ -6,12 +6,15 @@ import json
 from streamlit_local_storage import LocalStorage
 from datetime import datetime, timezone
 from core.database import initialize_database
-import os, subprocess, pathlib
+import os, subprocess, pathlib, logging
+
+logger = logging.getLogger("playwright_setup")
 
 if os.getenv("PLAYWRIGHT_AUTO_INSTALL")=="True":
     _marker = pathlib.Path("/tmp/.pw_installed")
     if not _marker.exists():
         try:
+            logger.info("Playwright auto-install enabled. Installing Chromium (--with-deps)...")
             subprocess.run(
                 ["python", "-m", "playwright", "install", "--with-deps", "chromium"],
                 check=True,
@@ -19,8 +22,11 @@ if os.getenv("PLAYWRIGHT_AUTO_INSTALL")=="True":
                 stderr=subprocess.STDOUT,
             )
             _marker.touch()
+            logger.info("Playwright Chromium install completed.")
         except Exception:
-            pass
+            logger.exception("Playwright Chromium install failed")
+    else:
+        logger.info("Playwright install skipped (marker present).")
 
 # Ensure DB is initialized (runs once per process)
 initialize_database()

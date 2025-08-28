@@ -181,7 +181,9 @@ def browse_credit_card_node(state: GraphState):
     )
 
     async def _browser_agent_run() -> str:
-        session = BrowserSession(headless=True, keep_alive=False, user_data_dir=None)
+        # Force using Playwright Chromium (avoid branded Chrome install attempts)
+        os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
+        session = BrowserSession(headless=True, keep_alive=False, user_data_dir=None, browser="playwright:chromium")
         today = datetime.date.today()
         current_date = today.strftime("%Y-%m-%d")
         current_month = today.strftime("%Y-%m")
