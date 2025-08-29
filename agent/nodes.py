@@ -237,9 +237,9 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
             writer({"step": "web_browse", "message": "🤖 Agent finish running"})
             content_items = history.extracted_content() or []
             final_result = history.final_result()
-            transactions = Transactions.model_validate_json(final_result)
-            writer({"step": "web_browse", "message": f"🤖 Agent return parsed {len(transactions)} transactions"})
-            return transactions
+            parsed_transactions = Transactions.model_validate_json(final_result)
+            writer({"step": "web_browse", "message": f"🤖 Agent return parsed {len(parsed_transactions.transactions)} transactions"})
+            return parsed_transactions.transactions
         finally:
             # Always terminate the browser to free resources
             try:
