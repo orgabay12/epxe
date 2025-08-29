@@ -217,11 +217,8 @@ def browse_credit_card_node(state: GraphState):
         )
         try:
             writer({"step": "web_browse", "message": "🤖 Agent running: login task..."})
-            page = agent.browser_session.agent_current_page
-            writer({"step": "web_browse", "message": "🤖 Agent running: got current page"})
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            writer({"step": "web_browse", "message": "🤖 Agent running: navigated to login page"})
             history_login = await agent.run(max_steps=5)
+            writer({"step": "web_browse", "message": "🤖 Agent finish login"})
             # Chain follow-up task to navigate to transactions
             task_tx = (
                 f"Navigate to {tx_url}. Ensure the transactions table is visible on the page. "
