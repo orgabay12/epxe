@@ -163,7 +163,7 @@ def classify_transaction_node(state: GraphState) -> GraphState:
 def browse_credit_card_node(state: GraphState):
     """
     Logs into the credit card issuer's website and extracts current-month transactions.
-    Uses browser-use with Azure OpenAI.
+    Uses Browser Use to launch Chromium, navigates with Playwright Page (DOM ready), then Azure OpenAI to extract transactions.
     """
     writer = get_stream_writer()
     writer({"step": "web_browse", "message": "🌐 Launching headless browser to fetch transactions..."})
@@ -173,130 +173,126 @@ def browse_credit_card_node(state: GraphState):
     username = settings.CREDIT_CARD_ISSUER_USERNAME
     password = settings.CREDIT_CARD_ISSUER_PASSWORD
 
-    bu_llm = ChatAzureOpenAI(
-        api_key=settings.AZURE_OPENAI_API_KEY,
-        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-        azure_deployment="gpt-4.1",
-        model="gpt-4.1",
-        api_version=settings.OPENAI_API_VERSION
-    )
+    # Browser Use (async) flow using Playwright Page from the session's browser_context
+    page_text = ""
+    async def _run_browser_use() -> str:
+        # Force Browser Use to use Playwright Chromium, not patchright
+        os.environ["BROWSER_USE_BROWSER"] = "playwright:chromium"
+        os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "info")
 
-    async def _browser_agent_run() -> str:
-        # Force using Playwright Chromium (avoid branded Chrome install attempts)
-        os.environ.setdefault("BROWSER_USE_BROWSER", "playwright:chromium")
-        os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "debug")
         profile = BrowserProfile(
             headless=True,
-            user_data_dir=None,
+            keep_alive=True,
             enable_default_extensions=False,
-            highlight_elements=False,
-            default_timeout=60000,
-            default_navigation_timeout=60000,
-            wait_for_network_idle_page_load_time=1.5,
+            locale="he-IL",
+            timezone_id="Asia/Jerusalem",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         )
         session = BrowserSession(
             browser_profile=profile,
-            keep_alive=True,
+            extra_launch_args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
-        today = datetime.date.today()
-        current_date = today.strftime("%Y-%m-%d")
-        current_month = today.strftime("%Y-%m")
-        # Start the session and open the login page up-front
+
         writer({"step": "web_browse", "message": "🚀 Starting BrowserSession..."})
         await session.start()
         writer({"step": "web_browse", "message": "✅ BrowserSession started"})
-        writer({"step": "web_browse", "message": "🧭 Getting current page handle..."})
-        writer({"step": "web_browse", "message": f"➡️ Navigating: {login_url}"})
-        page = await session.navigate(url=login_url, new_tab=True)
-        writer({"step": "web_browse", "message": "✅ Login page loaded"})
-        # Stage 1: Login
-        writer({"step": "web_browse", "message": "🤖 Running login agent..."})
-        login_agent = BrowserAgent(
-            task=(
-                f"1. You are on {login_url}.\n"
-                f"2. Log in with username '{username}' and password '{password}'.\n"
-                f"3. Finish as soon as the account area/dashboard is visible. Do not extract data in this stage."
-            ),
-            llm=bu_llm,
-            page=page,
-            browser_session=session
+ 
+        # Create a single BrowserAgent and instruct it to navigate via tasks (persistent session)
+        bu_llm = ChatAzureOpenAI(
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            api_version=settings.OPENAI_API_VERSION,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
         )
-        await login_agent.run(max_steps=25)
-        writer({"step": "web_browse", "message": "✅ Login agent finished"})
- 
-        # Manual navigation to transactions page
-        # Reacquire page in case the agent switched tabs or the handle changed
-        writer({"step": "web_browse", "message": "🧭 Getting current page for transactions..."})
-        writer({"step": "web_browse", "message": f"➡️ Navigating: {tx_url}"})
-        page = await session.navigate(url=tx_url, new_tab=False)
-        writer({"step": "web_browse", "message": "✅ Transactions page loaded"})
- 
-        # Stage 2: Extraction (text-only)
-        writer({"step": "web_browse", "message": "🧠 Running extraction agent..."})
+        task_login = (
+            f"Open {login_url}. Use the supplied credentials (username and password) to log in. "
+            "Wait for a clear post-login indicator (e.g., user menu, dashboard). "
+            "Do not close the tab. When logged in, reply with EXACTLY: READY_LOGIN"
+        )
         agent = BrowserAgent(
-            task=(
-                f"You are on the transactions page {tx_url}. Today's date is {current_date}.\n"
-                f"1. Ensure the date filter is set to the current month ({current_month}).\n"
-                f"2. Extract transactions using ONLY textual DOM content (innerText). Do NOT rely on images or OCR.\n"
-                f"3. Extract a table of transactions with columns merchant, amount, date.\n"
-                f"4. IMPORTANT: Do not include escaped unicode sequences (e.g., \\u0022) or HTML entities (e.g., &quot;). Use plain characters only.\n"
-                f"5. Return ONLY a JSON array with objects: {{merchant: string, amount: number, date: 'YYYY-MM-DD'}}."
-            ),
+            task=task_login,
             llm=bu_llm,
-            page=page,
             browser_session=session,
-            use_vision=False,
-            use_vision_for_planner=True
+            sensitive_data={"username": username, "password": password},
         )
-
         try:
-            history = await agent.run(max_steps=40)
-            writer({"step": "web_browse", "message": "✅ Extraction agent finished"})
-            # Try common helpers to get final text content
-            raw = None
+            writer({"step": "web_browse", "message": "🤖 Agent running: login task..."})
+            page = agent.browser_session.agent_current_page
+            writer({"step": "web_browse", "message": "🤖 Agent running: got current page"})
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            writer({"step": "web_browse", "message": "🤖 Agent running: navigated to login page"})
+            history_login = await agent.run(max_steps=5)
+            # Chain follow-up task to navigate to transactions
+            task_tx = (
+                f"Navigate to {tx_url}. Ensure the transactions table is visible on the page. "
+                "Do not download files and do not close the tab. Reply with EXACTLY: READY_TX"
+            )
+            agent.add_new_task(task_tx)
+            writer({"step": "web_browse", "message": "🤖 Agent running: transactions task..."})
+            history_tx = await agent.run(max_steps=30)
+            writer({"step": "web_browse", "message": "✅ Agent finished tasks, extracting content..."})
+
+            # Prefer agent history extracted content per docs; fallback to reading the page body
             try:
-                final_result = getattr(history, "final_result", None)
-                raw = final_result() if callable(final_result) else None
+                content_items = history_tx.extracted_content() or []
             except Exception:
-                raw = None
-            if not raw:
+                content_items = []
+            text_from_history = "\n\n".join([c for c in content_items if isinstance(c, str)]).strip()
+            if not text_from_history:
                 try:
-                    extracted = getattr(history, "extracted_content", None)
-                    raw = extracted() if callable(extracted) else None
+                    text_from_history = (history_tx.final_result() or "").strip()
                 except Exception:
-                    raw = None
-            return raw if isinstance(raw, str) else str(history)
+                    text_from_history = ""
+            if text_from_history:
+                return text_from_history
+
+            page = session.agent_current_page or (session.browser_context.pages[0] if len(session.browser_context.pages) > 0 else await session.browser_context.new_page())
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=60000)
+            except Exception:
+                pass
+            try:
+                body = page.locator("body")
+                text = await body.inner_text(timeout=5000)
+            except Exception:
+                text = await page.content()
+            return text
         finally:
+            # Always terminate the browser to free resources
             try:
-                if hasattr(session, "close"):
-                    await session.close()
+                await session.close()
+                writer({"step": "web_browse", "message": "🛑 BrowserSession closed"})
             except Exception:
                 pass
-            # Ensure the browser fully terminates
-            try:
-                if hasattr(session, "kill"):
-                    await session.kill()
-            except Exception:
-                pass
+
 
     try:
-        raw_content = asyncio.run(_browser_agent_run())
-        llm = AzureChatOpenAI(
-            azure_deployment='gpt-4.1',
-            openai_api_version=settings.OPENAI_API_VERSION
-        )
-        structured_llm = llm.with_structured_output(Transactions)
-        message = HumanMessage(content=(
-            "You are a strict validator. Convert the following to the schema Transactions[merchant, amount, date(YYYY-MM-DD)].\n"
-            "Do NOT emit escaped unicode sequences (e.g., \\uXXXX) or HTML entities (e.g., &quot;). Output plain characters only.\n"
-            f"Input:\n{raw_content}"
-        ))
-        validated = structured_llm.invoke([message])
-        count = len(validated.transactions)
-        writer({"step": "web_browse", "message": f"✅ Extracted {count} transaction(s) from issuer website"})
-        return {"transactions": validated.transactions}
-
+        page_text = asyncio.run(_run_browser_use())
     except Exception as e:
-        print(e)
         writer({"step": "web_browse", "message": f"❌ Error during web browsing: {str(e)}"})
+        return {"transactions": []}
+
+    # Use Azure LLM to extract transactions from text
+    llm = AzureChatOpenAI(
+        api_key=settings.AZURE_OPENAI_API_KEY,
+        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+        azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+        model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+        api_version=settings.OPENAI_API_VERSION
+    )
+    structured_llm = llm.with_structured_output(Transactions)
+    try:
+        writer({"step": "web_browse", "message": "🧠 Extracting transactions from page text..."})
+        prompt = (
+            "Extract all transactions visible in the following page text. "
+            "Return only merchant (string), amount (number), date (YYYY-MM-DD).\n\n"
+            f"PAGE TEXT:\n{page_text}"
+        )
+        resp = structured_llm.invoke([HumanMessage(content=prompt)])
+        count = len(resp.transactions)
+        writer({"step": "web_browse", "message": f"✅ Extracted {count} transaction(s) from web page"})
+        return {"transactions": resp.transactions}
+    except Exception as e:
+        writer({"step": "web_browse", "message": f"❌ Error extracting transactions: {str(e)}"})
         return {"transactions": []} 
