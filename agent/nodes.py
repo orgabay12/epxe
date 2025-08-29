@@ -137,7 +137,7 @@ def classify_transaction_node(state: GraphState) -> GraphState:
                 # Ensure the predicted category is one of the valid categories
                 if predicted_category in all_categories:
                     category = predicted_category
-                    writer({"step": "classification", "message": f"✅ AI classified '{tx.merchant}' as '{category}'"})
+                    writer({"step": "classification", "message": f"🤖 AI classified '{tx.merchant}' as '{category}'"})
                 else:
                     category = "Uncategorized" # Fallback if LLM hallucinates a new category
                     writer({"step": "classification", "message": f"⚠️ AI gave invalid category, using 'Uncategorized' for '{tx.merchant}'"})
