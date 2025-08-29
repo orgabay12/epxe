@@ -211,31 +211,26 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
         _month_start_str = _month_start.strftime("%Y-%m-%d")
         _next_month_start_str = _next_month_start.strftime("%Y-%m-%d")
 
-        task_login = (
+        combined_task = (
             f"go_to_url {login_url}. Use the supplied credentials (username and password) to log in. "
-            "Wait for a clear post-login indicator (e.g., user menu, dashboard). "
-            "Do not close the tab. When logged in, reply with EXACTLY: READY_LOGIN"
+            "Wait for a clear post-login indicator (e.g., user menu, dashboard). Then go_to_url "
+            f"{tx_url}. Ensure the transactions table is fully visible. "
+            "Extract ONLY the current month's transactions with complete coverage. "
+            f"Current month is dates >= {_month_start_str} and < {_next_month_start_str} (i.e., dates starting with '{_month_prefix}-'). "
+            "Instructions: \n"
+            "- If the list is paginated or infinite-scrolling, paginate/scroll until ALL transactions for this month are loaded. Stop when you reach any transaction outside this month. \n"
+            "- Return a JSON array in extracted content where each item has keys: merchant (string), amount (number), date (YYYY-MM-DD). Amounts should be numbers (negative for refunds), currency omitted. \n"
+            "- Normalize text: replace non-breaking spaces with normal spaces, remove zero-width characters, emojis and control characters; keep Hebrew and ASCII letters. Trim extra whitespace. \n"
+            "- Deduplicate rows if repeated. Ensure no current-month transaction is missing. \n"
+            "Do not download files and do not close the tab. Reply with EXACTLY: READY_TX when extraction is completed."
         )
         agent = BrowserAgent(
-            task=task_login,
+            task=combined_task,
             llm=bu_llm,
             browser_session=session,
             sensitive_data={"username": username, "password": password},
             output_model_schema=Transactions
         )
-
-        task_tx = (
-                f"go_to_url to {tx_url}. Ensure the transactions table is fully visible. "
-                "Extract ONLY the current month's transactions with complete coverage. "
-                f"Current month is dates >= {_month_start_str} and < {_next_month_start_str} (i.e., dates starting with '{_month_prefix}-'). "
-                "Instructions: \n"
-                "- If the list is paginated or infinite-scrolling, paginate/scroll until ALL transactions for this month are loaded. Stop when you reach any transaction outside this month. \n"
-                "- Return a JSON array in extracted content where each item has keys: merchant (string), amount (number), date (YYYY-MM-DD). Amounts should be numbers (negative for refunds), currency omitted. \n"
-                "- Normalize text: replace non-breaking spaces with normal spaces, remove zero-width characters, emojis and control characters; keep Hebrew and ASCII letters. Trim extra whitespace. \n"
-                "- Deduplicate rows if repeated. Ensure no current-month transaction is missing. \n"
-                "Do not download files and do not close the tab. Reply with EXACTLY: READY_TX when extraction is completed."
-            )
-        agent.add_new_task(task_tx)
         try:
             writer({"step": "web_browse", "message": "🤖 Agent start running..."})
             history = await agent.run(max_steps=10)
