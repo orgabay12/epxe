@@ -190,7 +190,6 @@ def browse_credit_card_node(state: GraphState):
         )
         session = BrowserSession(
             browser_profile=profile,
-            extra_launch_args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
 
         writer({"step": "web_browse", "message": "🚀 Starting BrowserSession..."})
