@@ -176,10 +176,6 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
     # Browser Use (async) flow using Playwright Page from the session's browser_context
     page_text = ""
     async def _run_browser_use() -> str:
-        # Force Browser Use to use Playwright Chromium, not patchright
-        os.environ["BROWSER_USE_BROWSER"] = "playwright:chromium"
-        os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "info")
-
         profile = BrowserProfile(
             headless=True,
             keep_alive=True,
@@ -242,12 +238,13 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
         agent.add_new_task(task_tx)
         try:
             writer({"step": "web_browse", "message": "🤖 Agent start running..."})
-            history = await agent.run(max_steps=5)
+            history = await agent.run(max_steps=10)
             writer({"step": "web_browse", "message": "🤖 Agent finish running"})
             content_items = history.extracted_content() or []
             final_result = history.final_result()
-            writer({"step": "web_browse", "message": "🤖 Agent return parsed transactions"})
-            return Transactions.model_validate_json(final_result)
+            transactions = Transactions.model_validate_json(final_result)
+            writer({"step": "web_browse", "message": f"🤖 Agent return parsed {len(transactions)} transactions"})
+            return transactions
         finally:
             # Always terminate the browser to free resources
             try:
