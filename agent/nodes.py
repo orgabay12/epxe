@@ -200,29 +200,21 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
             api_version=settings.OPENAI_API_VERSION,
             model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
         )
-        # Compute current month boundaries for precise filtering
+        # Compute current date and month context
         _today = datetime.date.today()
-        _month_start = _today.replace(day=1)
-        if _month_start.month == 12:
-            _next_month_start = datetime.date(_month_start.year + 1, 1, 1)
-        else:
-            _next_month_start = datetime.date(_month_start.year, _month_start.month + 1, 1)
         _month_prefix = _today.strftime("%Y-%m")
-        _month_start_str = _month_start.strftime("%Y-%m-%d")
-        _next_month_start_str = _next_month_start.strftime("%Y-%m-%d")
+        _today_str = _today.strftime("%Y-%m-%d")
 
         combined_task = (
-            f"go_to_url {login_url}. Use the supplied credentials (username and password) to log in. "
-            "Wait for a clear post-login indicator (e.g., user menu, dashboard). Then go_to_url "
-            f"{tx_url}. Ensure the transactions table is fully visible. "
-            "Extract ONLY the current month's transactions with complete coverage. "
-            f"Current month is dates >= {_month_start_str} and < {_next_month_start_str} (i.e., dates starting with '{_month_prefix}-'). "
-            "Instructions: \n"
-            "- If the list is paginated or infinite-scrolling, paginate/scroll until ALL transactions for this month are loaded. Stop when you reach any transaction outside this month. \n"
-            "- Return a JSON array in extracted content where each item has keys: merchant (string), amount (number), date (YYYY-MM-DD). Amounts should be numbers (negative for refunds), currency omitted. \n"
-            "- Normalize text: replace non-breaking spaces with normal spaces, remove zero-width characters, emojis and control characters; keep Hebrew and ASCII letters. Trim extra whitespace. \n"
-            "- Deduplicate rows if repeated. Ensure no current-month transaction is missing. \n"
-            "Do not download files and do not close the tab. Reply with EXACTLY: READY_TX when extraction is completed."
+            f"go_to_url {login_url}. Log in using the provided username and password. "
+            "Wait until you clearly see a logged-in indicator (e.g., avatar/user menu). "
+            f"Then go_to_url {tx_url} and ensure the transactions view is fully visible. "
+            f"Context: today is {_today_str}. Current month is '{_month_prefix}'. "
+            "Task: collect all transactions that belong to the current month only. Use your own reasoning to apply any date filters, navigate, scroll, and paginate as needed to ensure coverage. "
+            "Return the transactions as a JSON array in extracted content with keys: merchant (string), amount (number), date (YYYY-MM-DD). "
+            "IMPORTANT: Make sure you have collected all transactions for the current month and nothinng is missed. "
+            "Do not download files and do not close the tab. "
+            "When extraction is complete, reply with EXACTLY: READY_TX."
         )
         agent = BrowserAgent(
             task=combined_task,
