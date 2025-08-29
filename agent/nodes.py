@@ -212,7 +212,7 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
         _next_month_start_str = _next_month_start.strftime("%Y-%m-%d")
 
         task_login = (
-            f"Open {login_url}. Use the supplied credentials (username and password) to log in. "
+            f"go_to_url {login_url}. Use the supplied credentials (username and password) to log in. "
             "Wait for a clear post-login indicator (e.g., user menu, dashboard). "
             "Do not close the tab. When logged in, reply with EXACTLY: READY_LOGIN"
         )
@@ -225,7 +225,7 @@ def browse_credit_card_node(state: GraphState) -> list[Transactions]:
         )
 
         task_tx = (
-                f"Navigate to {tx_url}. Ensure the transactions table is fully visible. "
+                f"go_to_url to {tx_url}. Ensure the transactions table is fully visible. "
                 "Extract ONLY the current month's transactions with complete coverage. "
                 f"Current month is dates >= {_month_start_str} and < {_next_month_start_str} (i.e., dates starting with '{_month_prefix}-'). "
                 "Instructions: \n"
